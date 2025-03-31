@@ -4,6 +4,28 @@ import numpy as np
 from PIL import Image
 
 import albumentations as A
+
+def s_curve(x, alpha=1):
+    """Example: S-curve that boosts midtones"""
+    return 255 / (1 + alpha * np.exp(- (x - 128) / 20))
+
+def levels_adjust(image, in_black=30, in_white=220, function=None, **kwargs):
+    """
+    Simulates Photoshop's Levels adjustment:
+    - in_black: Input black point (pixels below this value are mapped to 0)
+    - in_white: Input white point (pixels above this value are mapped to 255)
+    - Pixels in between are linearly scaled between 0 and 255
+    """
+    image = image.astype(np.float32)
+    image = (image - in_black) / (in_white - in_black) * 255.0
+    image = np.clip(image, 0, 255)
+    
+    # mimic the function of Photoshope, different kinds of curve to adjust the level
+    if function == "s_curve":
+        image = s_curve(image, alpha=kwargs.get("alpha", 1))
+    return image.astype(np.uint8)
+
+
 class PairedTransforms:
     def __init__(self, image_size=(400, 600), train=True, bright_lumination_adjust_level=-1):
         """
@@ -43,8 +65,12 @@ class PairedTransforms:
         
         ##############################################################################
         
-        self.augment_bright = A.Compose([])
-        self.augment_low = A.Compose([])
+        self.augment_bright = A.Compose([
+            A.Illumination('gaussian', intensity_range=(0.01, 0.2), effect_type='both', p=0.8),  # randomly adjust the brightness and adjustment style
+        ])
+        self.augment_low = A.Compose([
+            A.Illumination('gaussian', intensity_range=(0.01, 0.2), effect_type='both', p=0.8),  # randomly adjust the brightness and adjustment style (In a natural way)
+        ])
         
         ##############################################################################
         

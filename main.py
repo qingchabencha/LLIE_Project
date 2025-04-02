@@ -15,6 +15,25 @@ import torch
 from tqdm import tqdm
 from torch.optim import AdamW
 args = get_args()
+
+
+train_store_parent = Path("./train_results")
+if not train_store_parent.exists():
+    train_store_parent.mkdir(parents=True, exist_ok=True)
+train_savedir = Path(args.train_save_dir)
+train_savedir = train_store_parent / train_savedir 
+if not train_savedir.exists():
+    os.makedirs(train_savedir)
+    create_model = True
+else:
+    create_model = False
+# store the images during the training
+if not (train_savedir/"training_results").exists():
+    os.makedirs(train_savedir/"training_results")
+    
+
+
+
 # read yaml file and get the model args
 yaml_info = yaml.safe_load(open(args.model_option, 'r'))
 model_args = yaml_info['network']
@@ -85,8 +104,25 @@ test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
 *********************************************
 """ 
-
-model = Model(model_args).to(device) # Currently directly output the input
+if create_model:
+    print("Create a new model")
+    model = Model(model_args).to(device) # Currently directly output the input
+    yaml.safe_dump(yaml_info, open(train_savedir / "train_option.yaml", 'w'), default_flow_style=False)
+else:
+    try:
+        print("Load the model from the directory {}".format(train_savedir))
+        model = torch.load(train_savedir / "model.pth")
+        yaml_info = yaml.safe_load(open(train_savedir / "train_option.yaml", 'r'))
+        model_args = yaml_info['network']
+        training_args = yaml_info['training']
+        # yaml_info = yaml.safe_load(open(args.model_option, 'r'))
+        # model_args = yaml_info['network']
+        # training_args = yaml_info['training']
+    except:
+        print("No model found in the directory, create from scratch")
+        model = Model(model_args).to(device) # Currently directly output the input
+        yaml.safe_dump(yaml_info, open(train_savedir / "train_option.yaml", 'w'), default_flow_style=False)
+        
 loss = nn.L1Loss().to(device)
 optimizer = AdamW(model.parameters(), lr=float(training_args['learning_rate']))
 
@@ -134,9 +170,11 @@ for epoch in range(training_args['epochs']):
                 target_high_light.to('cpu').detach(),
                 brightness_high.to('cpu').detach(),
                 brightness_low.to('cpu').detach(),
-                train_transform, save_path="./train_result/epoch_{}_iter_{}.png".format(epoch, i))
+                train_transform, save_path= train_savedir/"training_results/epoch_{}_iter_{}.png".format(epoch, i))
             valid_ = training_args['valid_per_iter']
-        
+    if epoch % 10 == 1:
+        torch.save(model, train_savedir / "model.pth")
+        print("model saved in {}".format(train_savedir / "model.pth"))
     log['loss_epoch'] = epoch_loss / len(train_loader)
     qbar.set_postfix(log)
     print("epoch: {}, loss: {}".format(epoch, log['loss_epoch']))

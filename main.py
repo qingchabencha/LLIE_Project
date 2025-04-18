@@ -14,6 +14,7 @@ import yaml
 import torch
 from tqdm import tqdm
 from torch.optim import AdamW
+from torch.optim.lr_scheduler import LambdaLR
 args = get_args()
 
 
@@ -125,8 +126,18 @@ else:
         
 # loss = nn.L1Loss().to(device)
 loss = VAELoss().to(device)
-optimizer = AdamW(model.parameters(), lr=float(training_args['learning_rate']))
+# learning rate
 
+
+initial_lr = float(training_args['learning_rate'])
+min_lr = float(training_args['learning_rate_min'])
+gamma =float(training_args['gamma'])
+
+def lr_lambda(epoch):
+    return max(gamma ** epoch, min_lr / initial_lr)
+
+optimizer = AdamW(model.parameters(), lr=initial_lr )
+scheduler = LambdaLR(optimizer, lr_lambda=lr_lambda)
 """
 ****************************************
 
@@ -142,6 +153,8 @@ log = {
 }
 
 valid_ = training_args['valid_per_iter']
+
+
 
 for epoch in range(training_args['epochs']):
     qbar = tqdm(train_loader)
@@ -166,17 +179,23 @@ for epoch in range(training_args['epochs']):
         # check the result of the training # TODO: Write additional function for saving the model
         valid_ -= 1
         if valid_ <= 0:
-            batchly_show_pic(
-                input_low_light.to('cpu').detach(),
-                predict_high_light.to('cpu').detach(),
-                target_high_light.to('cpu').detach(),
-                brightness_high.to('cpu').detach(),
-                brightness_low.to('cpu').detach(),
-                train_transform, save_path= train_savedir/"training_results/epoch_{}_iter_{}.png".format(epoch, i))
+            try:
+                batchly_show_pic(
+                    input_low_light.to('cpu').detach(),
+                    predict_high_light.to('cpu').detach(),
+                    target_high_light.to('cpu').detach(),
+                    brightness_high.to('cpu').detach(),
+                    brightness_low.to('cpu').detach(),
+                    train_transform, save_path= train_savedir/"training_results/epoch_{}_iter_{}.png".format(epoch, i))
+            except:
+                print("Error in saving the image")
             valid_ = training_args['valid_per_iter']
     if epoch % 10 == 1:
         torch.save(model, train_savedir / "model.pth")
         print("model saved in {}".format(train_savedir / "model.pth"))
+        
+    # update learning rate
+    scheduler.step()
     log['loss_epoch'] = epoch_loss / len(train_loader)
     qbar.set_postfix(log)
     print("epoch: {}, loss: {}".format(epoch, log['loss_epoch']))

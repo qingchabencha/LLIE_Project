@@ -152,7 +152,7 @@ for epoch in range(training_args['epochs']):
         target_high_light = batch["bright"].to(device)
         brightness_low = batch["low_brightness_value"].to(device)
         brightness_high = batch["bright_brightness_value"].to(device)
-        predict_high_light = model(input_low_light, input_brightness = brightness_low ,target_brightness=brightness_high )
+        predict_high_light = model(input_low_light, target_high_light ,input_brightness = brightness_low ,target_brightness=brightness_high )
         l = loss(predict_high_light, target_high_light)
         l.backward()
         optimizer.step()

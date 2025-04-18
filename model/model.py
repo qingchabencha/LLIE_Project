@@ -45,10 +45,18 @@ class Model(torch.nn.Module):
         else:
             raise ValueError("model_illumination_estimator_model should be CNN or FFC the method {} is not supported".format(
                 model_args['model_illumination_estimator_model']))
-
         # ***********************************************************************************************
 
-        # Second part, Denoise part
+        # Second part, value generation part
+
+        # ***********************************************************************************************
+        
+        self.colorRestoration = module_retindexformer.ColorComplementorVAE(hidden_channel_dim=model_args["IE_feature_channels"])
+        
+        
+        # ***********************************************************************************************
+
+        # Third part, Denoise part
 
         # ***********************************************************************************************
 
@@ -76,7 +84,7 @@ class Model(torch.nn.Module):
     
     
 
-    def forward(self, low, input_brightness=-1, target_brightness=-1):
+    def forward(self, low, target_pic ,input_brightness=-1, target_brightness=-1):
         """
         Forward pass of the model.
 
@@ -92,11 +100,15 @@ class Model(torch.nn.Module):
 
         # Do Illumination Estimation
         illu_fea, illu_map = self.illuminattion_estimator(low, lp)
-        # pixel has insufficient illumination might directly set to 0,0,0, with no color to light up
+        # 添加信息后在提亮
+        
+        
         Lit_up_img = illu_map * low + low
 
-        # Denoise the artifcat & noise (e.g., ISO noise) in the image
+        # pixel has insufficient illumination might directly set to 0,0,0, with no color to light up
+        # TODO::implement VAE here, according to illumination prior & input image to create color for underexposed area
 
+        # Denoise the artifcat & noise (e.g., ISO noise) in the image
         output_img = self.denoise(Lit_up_img, illu_fea)
 
         return output_img

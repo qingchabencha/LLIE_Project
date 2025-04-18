@@ -3,7 +3,33 @@ from torch import nn
 import torch.nn.functional as F
 from einops import rearrange
 
-
+class ColorComplementorVAE(nn.Module):
+    def __init__(self, hidden_channel_dim, feature_in=4, feature_out=3, **kwargs):
+        self.hidden = hidden_channel_dim
+        pass
+    
+    def reparameterize(self, mu, log_var):  # 从编码器输出的均值和对数方差中采样得到潜在变量z
+        if self.train():
+            std = torch.exp(0.5 * log_var)  # 计算标准差
+            eps = torch.randn_like(std)  # 从标准正态分布中采样得到随机噪声
+            return mu + eps * std  # 根据重参数化公式计算潜在变量z
+        else:
+            return torch.randn(1)
+    
+    def encode(self, x):
+        mu = 0
+        log_var = 0
+        return mu, log_var
+    
+    def decode(self, x):
+        return x
+    
+    def forward(self, x, target,):
+        """
+        x: [b,c,h,w]
+        return out: [b,c,h,w]
+        """
+        return x
 
 class Illumination_Estimator(nn.Module):
     def __init__(self, model_type , hidden_channel_dim, feature_in=4, feature_out=3, **kwargs):
@@ -272,6 +298,6 @@ class Denoiser(nn.Module):
 
         # Mapping
         img_restoration = self.mapping(fea)
-        out = img_restoration + lit_up_image
+        out = torch.clamp(img_restoration + lit_up_image, 0, 1)
 
         return out

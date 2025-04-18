@@ -17,6 +17,10 @@ network:
 
   # if FFC
 
+  # VAE model
+  latent_dim: 128 # latent dim for VAE
+  latent_layer: 3
+
   # The denoiser module
   number_blocks: [1,2,2] # block number for Attention module.
 

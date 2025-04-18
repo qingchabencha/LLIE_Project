@@ -10,7 +10,7 @@ def get_args():
     parser.add_argument(
         "--train_save_dir",
         type=str,
-        default="1",
+        default="2",
         help="Directory to save training results, default save to './train_results', if specified the file directory, like 1, it will try to load the trained model first",
     )
 

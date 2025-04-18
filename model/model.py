@@ -17,6 +17,7 @@ class RELLIE(nn.Module):
         self.reflectance_extractor =  RetinexExtractor()
         self.illumination_extractor = RetinexExtractor()
         self.illumination_enhancer = RetinexExtractor()
+        self.reflectance_enhancer = RetinexExtractor()
     
     def forward(self, input_low_light, target_high_light, mode):
         if mode == 'train':
@@ -34,8 +35,9 @@ class RELLIE(nn.Module):
 
             # enhance illumination for low light image
             enhanced_illumination = self.illumination_enhancer(illumination_low_light)
+            enhanced_reflectance = self.reflectance_enhancer(reflectance_low_light)
 
-            return reflectance_low_light, reflectance_high_light, illumination_low_light, illumination_high_light, enhanced_illumination
+            return reflectance_low_light, reflectance_high_light, illumination_low_light, illumination_high_light, enhanced_illumination, enhanced_reflectance
 
         if mode == 'eval':
             # pass through transformer
@@ -49,5 +51,6 @@ class RELLIE(nn.Module):
 
             # enhance illumination for low light image
             enhanced_illumination = self.illumination_enhancer(illumination_low_light)
+            enhanced_reflectance = self.reflectance_enhancer(reflectance_low_light)
 
-            return reflectance_low_light * enhanced_illumination
+            return enhanced_reflectance * enhanced_illumination

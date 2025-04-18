@@ -22,11 +22,12 @@ class ResidualBlock(nn.Module):
     def forward(self, x):
         return x + self.body(x)
 
-class RetinexExtractor(nn.Module):
-    def __init__(self, n_resblocks=4, n_feats=64):
+class UNet(nn.Module):
+    def __init__(self, n_resblocks=4, n_feats=64, input_feats = 3, output_feats = 3, mean_shift = False):
         super().__init__()
         
         # Normalization
+        self.mean_shift = mean_shift
         rgb_mean = (0.4488, 0.4371, 0.4040)
         rgb_std = (1.0, 1.0, 1.0)
         self.sub_mean = MeanShift(1.0, rgb_mean, rgb_std)
@@ -34,7 +35,7 @@ class RetinexExtractor(nn.Module):
 
         # Enhanced Head (3 conv layers)
         self.head = nn.Sequential(
-            nn.Conv2d(3, n_feats//2, 3, padding=1),
+            nn.Conv2d(input_feats, n_feats//2, 3, padding=1),
             nn.ReLU(True),
             nn.Conv2d(n_feats//2, n_feats, 3, padding=1),
             nn.ReLU(True),
@@ -53,22 +54,29 @@ class RetinexExtractor(nn.Module):
             nn.ReLU(True),
             nn.Conv2d(n_feats//2, n_feats//4, 3, padding=1),
             nn.ReLU(True),
-            nn.Conv2d(n_feats//4, 3, 3, padding=1),
+            nn.Conv2d(n_feats//4, output_feats, 3, padding=1),
             nn.ReLU(True)
         )
 
     def forward(self, x):
-        # Input check
-        if x.dim() != 4 or x.size(1) != 3:
-            raise ValueError("Input must be [batch, 3, H, W] tensor")
-            
         # Normalize
-        x = self.sub_mean(x)
+        if self.mean_shift:
+            x = self.sub_mean(x)
         
         # Process through deeper head
+        #print(f'before head: {x.size()}')
         x = self.head(x)
+        #print(f'after head: {x.size()}')
         res = self.body(x)
         x = x + res  # Skip connection
-        
+        #print(f'resd:dddd {x.size()}')
+
         # Reconstruct through deeper tail
-        return self.add_mean(self.tail(x))
+        x = self.tail(x)
+        #print(f'after tail: {x.size()}')
+
+        
+        if self.mean_shift:
+            x = self.add_mean(x)
+
+        return x

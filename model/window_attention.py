@@ -146,4 +146,5 @@ class WindowAttention(nn.Module):
         if self.shifted:
             out = self.cyclic_back_shift(out)
         
+        #out = x + out # residual connection
         return out

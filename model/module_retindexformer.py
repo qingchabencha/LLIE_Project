@@ -4,32 +4,106 @@ import torch.nn.functional as F
 from einops import rearrange
 
 class ColorComplementorVAE(nn.Module):
-    def __init__(self, hidden_channel_dim, feature_in=4, feature_out=3, **kwargs):
-        self.hidden = hidden_channel_dim
-        pass
+    def __init__(self, lattent_dim, encode_layer , feature_in=4, feature_out=3, **kwargs):
+        super(ColorComplementorVAE, self).__init__()
+        self.lattent_dim = lattent_dim
+        self.feature_in = feature_in
+        self.feature_out = feature_out # output image size
+        self.encode_layer = encode_layer
+        self.decoder_dim_in = self.lattent_dim * 2
+        
+        # encode the target picture into latent space
+        self.encoder_shape_list = [int(self.lattent_dim / 2 ** i) for i in range(self.encode_layer)]
+        self.encoder_shape_list.sort() # [8, 16, 32]
+        self.decoder_shape_list = self.encoder_shape_list[::-1] # [32, 16, 8]
+        
+        self.encoder = nn.ModuleList()
+        for i in range(self.encode_layer):
+            if i == 0:
+                self.encoder.append(nn.Conv2d(self.feature_out, self.encoder_shape_list[i], kernel_size=3, stride=2, padding=1, bias=True))
+            else:
+                self.encoder.append(nn.Conv2d(int(self.encoder_shape_list[i-1]), int(self.encoder_shape_list[i]), kernel_size=3, stride=2, padding=1, bias=True))
+            self.encoder.append(nn.ReLU())
+            
+        self.encoder_mu = nn.Linear(self.encoder_shape_list[-1], self.lattent_dim) # 32 -> 32
+        self.encoder_log_var = nn.Linear(self.encoder_shape_list[-1], self.lattent_dim) # 32 -> 32
+        
+        
+        # decode part
+        self.decoder_same_representation = nn.ModuleList()
+        for i in range(self.encode_layer):
+            if i == 0:
+                self.decoder_same_representation.append(nn.Conv2d(self.feature_in, self.encoder_shape_list[i], kernel_size=3, stride=2, padding=1, bias=True))
+            else:
+                self.decoder_same_representation.append(nn.Conv2d(int(self.encoder_shape_list[i-1]), int(self.encoder_shape_list[i]), kernel_size=3, stride=2, padding=1, bias=True))
+            if i != self.encode_layer - 1:
+                self.decoder_same_representation.append(nn.ReLU())
+        self.decoder = nn.ModuleList()
+        for i in range(self.encode_layer):
+            if i == 0:
+                self.decoder.append(nn.ConvTranspose2d(self.decoder_dim_in, self.decoder_shape_list[i], kernel_size=3, stride=2, padding=1, output_padding=1, bias=True))
+            else:
+                self.decoder.append(nn.ConvTranspose2d(int(self.decoder_shape_list[i-1]), int(self.decoder_shape_list[i]), kernel_size=3, stride=2, padding=1, output_padding=1, bias=True))
+            if i != self.encode_layer - 1:
+                self.decoder.append(nn.ReLU())
+        
+        # output restored image
+        self.restore = nn.Conv2d(self.decoder_shape_list[-1], self.feature_out, kernel_size=3, stride=1, padding=1, bias=True)
+            
+
     
     def reparameterize(self, mu, log_var):  # 从编码器输出的均值和对数方差中采样得到潜在变量z
-        if self.train():
+        if self.training:
             std = torch.exp(0.5 * log_var)  # 计算标准差
             eps = torch.randn_like(std)  # 从标准正态分布中采样得到随机噪声
             return mu + eps * std  # 根据重参数化公式计算潜在变量z
         else:
             return torch.randn(1)
     
-    def encode(self, x):
-        mu = 0
-        log_var = 0
-        return mu, log_var
+    def encode(self, target_img):
+        latent = target_img
+        for layer in self.encoder:
+            latent = layer(latent)
+        latent = latent.permute(0, 2, 3, 1).contiguous()
+        mu = self.encoder_mu(latent)  # 将特征图展平并通过线性层计算均值
+        log_var = self.encoder_log_var(latent)  # 将特征图展平并通过线性层计算对数方差
+        latent = self.reparameterize(mu, log_var)  # 通过重参数化采样得到潜在变量z
+        return mu, log_var, latent.permute(0, 3, 1, 2).contiguous()  # 将潜在变量z重新排列为原始形状并返回
     
-    def decode(self, x):
-        return x
+    def decode(self, latent, lited_up_image, illu_fea):
+        feature = torch.cat((lited_up_image, illu_fea), dim=1)
+        for layer in self.decoder_same_representation:
+            feature = layer(feature)
+        restored_img = torch.cat((latent, feature), dim=1)  # 将潜在变量z和特征图拼接在一起
+        # U-Net 恢复图像
+        for layer in self.decoder:
+            restored_img = layer(restored_img)
+        restored_img = self.restore(restored_img)  # 将恢复后的图像通过卷积层映射到输出通道数
+        return restored_img
     
-    def forward(self, x, target,):
+    def forward(self, lited_up_image, illu_fea, target=None):
         """
-        x: [b,c,h,w]
-        return out: [b,c,h,w]
+        restore the color
+
+        Args:
+            lited_up_image (_type_): image after the illumination estimation, for instructing generation
+            illumination_map (_type_): illumination of each pixel in the image, for instructing generation
+            target (_type_, optional): the output image, None if not training. Defaults to None.
+        Returns:
+            _type_: _description_
         """
-        return x
+        if self.training:
+            mu, log_var, latent = self.encode(target)
+        else:
+            mu = None
+            log_var = None
+            len_batch =  lited_up_image.size(0)
+            hidden = self.lattent_dim
+            H = lited_up_image.size(2) // 2 ** self.encode_layer
+            W = lited_up_image.size(3) // 2 ** self.encode_layer
+            latent = torch.randn(len_batch, hidden, H, W).to(lited_up_image.device)  # 随机生成潜在变量z
+        restored_img = self.decode(latent, lited_up_image, illu_fea)
+        return  restored_img, mu, log_var
 
 class Illumination_Estimator(nn.Module):
     def __init__(self, model_type , hidden_channel_dim, feature_in=4, feature_out=3, **kwargs):

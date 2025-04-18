@@ -18,15 +18,15 @@ network:
   # if FFC
 
   # VAE model
-  latent_dim: 128 # latent dim for VAE
-  latent_layer: 3
+  latent_dim: 32 # latent dim for VAE
+  latent_encode_layer: 3
 
   # The denoiser module
   number_blocks: [1,2,2] # block number for Attention module.
 
 
 training:
-  batch_size : 5
+  batch_size : 4
   epochs: 100
   valid_per_iter : 100
   learning_rate: 1e-4

@@ -6,7 +6,7 @@ from torchvision import transforms
 from DatasetAndAugmentation.LowHighDataAugment import PairedTransforms
 from DatasetAndAugmentation.LowHightDataset import LOLPairedDataset
 import matplotlib.pyplot as plt
-from model.model import Model
+from model.model import Model, VAELoss
 import torch.nn as nn
 from utils import cal_brightness, batchly_show_pic
 from get_args import get_args
@@ -123,7 +123,8 @@ else:
         model = Model(model_args).to(device) # Currently directly output the input
         yaml.safe_dump(yaml_info, open(train_savedir / "train_option.yaml", 'w'), default_flow_style=False)
         
-loss = nn.L1Loss().to(device)
+# loss = nn.L1Loss().to(device)
+loss = VAELoss().to(device)
 optimizer = AdamW(model.parameters(), lr=float(training_args['learning_rate']))
 
 """
@@ -152,8 +153,9 @@ for epoch in range(training_args['epochs']):
         target_high_light = batch["bright"].to(device)
         brightness_low = batch["low_brightness_value"].to(device)
         brightness_high = batch["bright_brightness_value"].to(device)
-        predict_high_light = model(input_low_light, target_high_light ,input_brightness = brightness_low ,target_brightness=brightness_high )
-        l = loss(predict_high_light, target_high_light)
+        predict_high_light, mu, log_var = model(input_low_light, target_high_light ,input_brightness = brightness_low ,target_brightness=brightness_high )
+        # l = loss(predict_high_light, target_high_light)
+        l = loss(predict_high_light, target_high_light, mu, log_var)
         l.backward()
         optimizer.step()
         loss_value = l.to('cpu').detach().item()

@@ -51,7 +51,11 @@ class Model(torch.nn.Module):
 
         # ***********************************************************************************************
         
-        self.colorRestoration = module_retindexformer.ColorComplementorVAE(hidden_channel_dim=model_args["IE_feature_channels"])
+        self.colorRestorator = module_retindexformer.ColorComplementorVAE(
+            lattent_dim=model_args["latent_dim"],
+            encode_layer=model_args["latent_encode_layer"],
+            feature_in = model_args["IE_feature_channels"] + 3 # light up image + feature
+            )
         
         
         # ***********************************************************************************************
@@ -101,14 +105,44 @@ class Model(torch.nn.Module):
         # Do Illumination Estimation
         illu_fea, illu_map = self.illuminattion_estimator(low, lp)
         # 添加信息后在提亮
-        
-        
         Lit_up_img = illu_map * low + low
 
         # pixel has insufficient illumination might directly set to 0,0,0, with no color to light up
         # TODO::implement VAE here, according to illumination prior & input image to create color for underexposed area
-
+        restored_img, mu, log_var = self.colorRestorator(Lit_up_img, illu_fea, target_pic)
+        
         # Denoise the artifcat & noise (e.g., ISO noise) in the image
-        output_img = self.denoise(Lit_up_img, illu_fea)
+        output_img = self.denoise(restored_img, illu_fea)
 
-        return output_img
+        return output_img, mu, log_var
+
+
+class VAELoss(torch.nn.Module):
+    """
+    A class for the VAE loss.
+    """
+    def __init__(self):
+        """
+        Initialize the VAE loss with the given model and device.
+
+        Args:
+            model_args (torch.nn.Module): Argument for initlialize the model, use ./Options/xxx.yml to see the details.
+        """
+        super(VAELoss, self).__init__()
+        self.l1_loss = torch.nn.L1Loss()
+    def forward(self, output, target, mu, log_var):
+        """
+        Forward pass of the VAE loss.
+
+        Args:
+            output (torch.Tensor): The original low-light image.
+            target (torch.Tensor): The target high-light image.
+            mu (torch.Tensor): The mean of the latent variable.
+            log_var (torch.Tensor): The log variance of the latent variable.
+
+        """
+        # Reconstruction loss
+        recon_loss = self.l1_loss(output, target)
+        # KL divergence loss
+        kl_loss = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
+        return recon_loss + kl_loss

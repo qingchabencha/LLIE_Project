@@ -99,6 +99,7 @@ class WindowAttention(nn.Module):
         self.to_out = nn.Conv2d(dim, in_channel, kernel_size=3, padding = 'same')
 
     def forward(self, x):
+        initial_x = x
         x = self.patch_partition(x)  # (B, H, W, C)
         #print(x.size())
         if self.shifted:
@@ -145,6 +146,6 @@ class WindowAttention(nn.Module):
         #print(out.size())
         if self.shifted:
             out = self.cyclic_back_shift(out)
-        
-        out = x + out # residual connection
+
+        out = initial_x + out # residual connection
         return out

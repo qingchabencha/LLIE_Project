@@ -141,8 +141,12 @@ class VAELoss(torch.nn.Module):
             log_var (torch.Tensor): The log variance of the latent variable.
 
         """
+        
         # Reconstruction loss
         recon_loss = self.l1_loss(output, target)
         # KL divergence loss
-        kl_loss = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
+        if mu is not None:
+            kl_loss = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
+        else:
+            kl_loss = 0.0
         return recon_loss + kl_loss

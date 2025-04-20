@@ -26,7 +26,7 @@ network:
 
 
 training:
-  batch_size : 4
+  batch_size : 1
   epochs: 500
   valid_per_iter : 100
   learning_rate: 1e-3

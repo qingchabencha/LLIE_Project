@@ -69,6 +69,8 @@ def batchly_show_pic(input_batch,
     """
     batch_size = input_batch.shape[0]
     fig, axes = plt.subplots(3, batch_size, figsize=(3 * batch_size, 9))
+    if batch_size == 1:
+        axes = np.expand_dims(axes, axis=0).T
     for i in range(batch_size):
         predict_high_light_PIL, target_high_light_PIL = aug_transform.tensor2PIL(predict_batch[i,...],  target_batch[i,...])
         input_low_light_PIL, _  = aug_transform.tensor2PIL(input_batch[i,...], None)
@@ -91,8 +93,10 @@ def batchly_show_pic(input_batch,
         axes[2, i].axis('off')
     if save_path is None:
         plt.show()
+        plt.close()
     else:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.close()
 
 if __name__ == "__main__":
     test_high_pic = Image.open("./LOLdataset/test/high/1.png")
@@ -100,3 +104,16 @@ if __name__ == "__main__":
     cal_brightness(test_high_pic)
     print(f"light of the high image: {cal_brightness(test_high_pic)}")
     print(f"light of the low image: {cal_brightness(test_low_pic)}")
+    
+    
+def torch_type_adapt(input:torch.Tensor, device:torch.device) -> torch.Tensor:
+    """
+    Adapt the input tensor to the device type. if the device is 'mps', convert the input tensor to float32.
+    :param input: Input tensor
+    :param device: Device type (e.g., 'cpu', 'cuda', 'mps')
+    
+    :return: Adapted input tensor
+    """
+    if device.type == 'mps':
+        input = input.float()
+    return input

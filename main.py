@@ -8,13 +8,14 @@ from DatasetAndAugmentation.LowHightDataset import LOLPairedDataset
 import matplotlib.pyplot as plt
 from model.model import Model, VAELoss
 import torch.nn as nn
-from utils import cal_brightness, batchly_show_pic
+from utils import cal_brightness, batchly_show_pic, torch_type_adapt
 from get_args import get_args
 import yaml
 import torch
 from tqdm import tqdm
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
+import random
 args = get_args()
 
 
@@ -94,7 +95,7 @@ test_dataset = LOLPairedDataset(test_low_dir,
                                 transform=test_transform, 
                                 train=False, 
                                 brightness_calculation_option=model_args['brightness_calculation_option'])
-test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
+test_loader = DataLoader(test_dataset, batch_size=3, shuffle=False)
 
 
 
@@ -112,7 +113,9 @@ if create_model:
 else:
     try:
         print("Load the model from the directory {}".format(train_savedir))
-        model = torch.load(train_savedir / "model.pth")
+        device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+        print("Loading model to device: {}".format(device))
+        model = torch.load(train_savedir / "model.pth", map_location=device)
         yaml_info = yaml.safe_load(open(train_savedir / "train_option.yaml", 'r'))
         model_args = yaml_info['network']
         training_args = yaml_info['training']
@@ -154,20 +157,21 @@ log = {
 
 valid_ = training_args['valid_per_iter']
 
-
-
-for epoch in range(training_args['epochs']):
+def train_epoch(model, train_loader, log, optimizer, loss, device, epoch_num):
+    model.train()
+    loss.train()
     qbar = tqdm(train_loader)
-    log["epoch"] = epoch
+    log["epoch"] = epoch_num
     epoch_loss = 0
+    epoch_iter_num = len(train_loader)
+    show_iter = int(random.uniform(0, epoch_iter_num))
     for i, batch in enumerate(qbar):
         optimizer.zero_grad()
-        input_low_light = batch["low"].to(device)
-        target_high_light = batch["bright"].to(device)
-        brightness_low = batch["low_brightness_value"].to(device)
-        brightness_high = batch["bright_brightness_value"].to(device)
-        predict_high_light, mu, log_var = model(input_low_light, target_high_light ,input_brightness = brightness_low ,target_brightness=brightness_high )
-        # l = loss(predict_high_light, target_high_light)
+        input_low_light = torch_type_adapt(batch["low"], device).to(device)
+        target_high_light = torch_type_adapt(batch["bright"], device).to(device)
+        brightness_low = torch_type_adapt(batch["low_brightness_value"], device).to(device)
+        brightness_high = torch_type_adapt(batch["bright_brightness_value"], device).to(device)    
+        predict_high_light, mu, log_var = model(input_low_light, target_high_light ,input_brightness = brightness_low ,target_brightness=brightness_high ) 
         l = loss(predict_high_light, target_high_light, mu, log_var)
         l.backward()
         optimizer.step()
@@ -175,10 +179,8 @@ for epoch in range(training_args['epochs']):
         log["loss_iter"] = loss_value
         epoch_loss += loss_value
         qbar.set_postfix(log)
-        
-        # check the result of the training # TODO: Write additional function for saving the model
-        valid_ -= 1
-        if valid_ <= 0:
+        # randomly show the image during the training
+        if i == show_iter:
             try:
                 batchly_show_pic(
                     input_low_light.to('cpu').detach(),
@@ -186,14 +188,40 @@ for epoch in range(training_args['epochs']):
                     target_high_light.to('cpu').detach(),
                     brightness_high.to('cpu').detach(),
                     brightness_low.to('cpu').detach(),
-                    train_transform, save_path= train_savedir/"training_results/epoch_{}_iter_{}.png".format(epoch, i))
+                    train_transform, save_path= train_savedir/"training_results/train_epoch_{}_iter_{}.png".format(epoch_num, i))
             except:
                 print("Error in saving the image")
-            valid_ = training_args['valid_per_iter']
+        break
+    return model, log, optimizer, loss, device, epoch_num, epoch_loss, qbar
+
+def test_epoch(model, test_loader, log, loss, device, epoch_num):
+    model.eval()
+    loss.eval()
+    for i, batch in enumerate(test_loader):
+        input_low_light = torch_type_adapt(batch["low"], device).to(device)
+        target_high_light = torch_type_adapt(batch["bright"], device).to(device)
+        brightness_low = torch_type_adapt(batch["low_brightness_value"], device).to(device)
+        brightness_high = torch_type_adapt(batch["bright_brightness_value"], device).to(device)    
+        predict_high_light, mu, log_var = model(input_low_light, target_high_light ,input_brightness = brightness_low ,target_brightness=brightness_high ) 
+        l = loss(predict_high_light, target_high_light, mu, log_var)
+        loss_value = l.to('cpu').detach().item()
+        batchly_show_pic(
+                input_low_light.to('cpu').detach(),
+                predict_high_light.to('cpu').detach(),
+                target_high_light.to('cpu').detach(),
+                brightness_high.to('cpu').detach(),
+                brightness_low.to('cpu').detach(),
+                train_transform, save_path= train_savedir/"training_results/test_epoch_{}_iter_{}.png".format(epoch, i))
+    return model, log, loss, device, epoch_num
+    
+
+
+for epoch in range(training_args['epochs']):
+    model, log, optimizer, loss, device, epoch_num, epoch_loss, qbar = train_epoch(model, train_loader, log, optimizer, loss, device, epoch)
+    model,  log, loss, device, epoch_num = test_epoch(model, test_loader, log, loss, device, epoch)
     if epoch % 10 == 1:
         torch.save(model, train_savedir / "model.pth")
         print("model saved in {}".format(train_savedir / "model.pth"))
-        
     # update learning rate
     scheduler.step()
     log['loss_epoch'] = epoch_loss / len(train_loader)
@@ -209,4 +237,4 @@ for epoch in range(training_args['epochs']):
 
 *********************************************
 """ 
-batchly_show_pic(input_low_light, predict_high_light, target_high_light, brightness_high, brightness_low, train_transform)
+# batchly_show_pic(input_low_light, predict_high_light, target_high_light, brightness_high, brightness_low, train_transform)

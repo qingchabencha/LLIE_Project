@@ -191,7 +191,6 @@ def train_epoch(model, train_loader, log, optimizer, loss, device, epoch_num):
                     train_transform, save_path= train_savedir/"training_results/train_epoch_{}_iter_{}.png".format(epoch_num, i))
             except:
                 print("Error in saving the image")
-        break
     return model, log, optimizer, loss, device, epoch_num, epoch_loss, qbar
 
 def test_epoch(model, test_loader, log, loss, device, epoch_num):

@@ -3,6 +3,95 @@ from torch import nn
 import torch.nn.functional as F
 from einops import rearrange
 
+class ColorComplementorCVAE(nn.Module):
+    def __init__(self, lattent_dim, encode_layer , feature_in=4, feature_out=3, **kwargs):
+        super(ColorComplementorCVAE, self).__init__()
+        self.lattent_dim = lattent_dim
+        self.feature_in = feature_in
+        self.feature_out = feature_out
+        self.encode_layer = encode_layer
+        self.decoder_dim_in = self.lattent_dim
+
+        self.color_amplifier = nn.Sequential(
+            nn.Conv2d(feature_out, feature_out, kernel_size=1),
+            nn.ReLU()
+        )
+
+        self.encoder_shape_list = [int(self.lattent_dim / 2 ** i) for i in range(self.encode_layer)]
+        self.encoder_shape_list.sort()
+        self.decoder_shape_list = self.encoder_shape_list[::-1]
+
+        self.encoder = nn.ModuleList()
+        for i in range(self.encode_layer):
+            in_channels = self.feature_in if i == 0 else self.encoder_shape_list[i-1]
+            self.encoder.append(nn.Conv2d(in_channels, self.encoder_shape_list[i], kernel_size=3, stride=2, padding=1, bias=True))
+            self.encoder.append(nn.ReLU())
+            in_channels = self.encoder_shape_list[i]
+
+        self.encoder_mu = nn.Linear(self.encoder_shape_list[-1], self.lattent_dim)
+        self.encoder_log_var = nn.Linear(self.encoder_shape_list[-1], self.lattent_dim)
+
+        self.decoder_same_representation = nn.ModuleList()
+        for i in range(self.encode_layer):
+            in_channels = self.feature_in if i == 0 else self.encoder_shape_list[i-1]
+            self.decoder_same_representation.append(nn.Conv2d(in_channels, self.encoder_shape_list[i], kernel_size=3, stride=2, padding=1, bias=True))
+            if i != self.encode_layer - 1:
+                self.decoder_same_representation.append(nn.ReLU())
+
+        self.decoder = nn.ModuleList()
+        for i in range(self.encode_layer):
+            in_channels = self.decoder_dim_in + self.encoder_shape_list[-1] if i == 0 else self.decoder_shape_list[i-1]
+            self.decoder.append(nn.ConvTranspose2d(in_channels, self.decoder_shape_list[i], kernel_size=3, stride=2, padding=1, output_padding=1, bias=True))
+            if i != self.encode_layer - 1:
+                self.decoder.append(nn.ReLU())
+
+        self.restore = nn.Conv2d(self.decoder_shape_list[-1], self.feature_out, kernel_size=3, stride=1, padding=1, bias=True)
+
+    def reparameterize(self, mu, log_var):
+        if self.training:
+            std = torch.exp(0.5 * log_var)
+            eps = torch.randn_like(std)
+            return mu + eps * std
+        else:
+            return torch.randn(1)
+
+    def encode(self, target_img, illu_fea):
+        amplified_img = self.color_amplifier(target_img)
+        fused_input = torch.cat((amplified_img, illu_fea), dim=1)
+        latent = fused_input
+        for layer in self.encoder:
+            latent = layer(latent)
+        latent = latent.permute(0, 2, 3, 1).contiguous()
+        mu = self.encoder_mu(latent)
+        log_var = self.encoder_log_var(latent)
+        z = self.reparameterize(mu, log_var)
+        z = z.permute(0, 3, 1, 2).contiguous()
+        return mu, log_var, z
+
+    def decode(self, latent, lited_up_image, illu_fea):
+        feature = torch.cat((lited_up_image, illu_fea), dim=1)
+        for layer in self.decoder_same_representation:
+            feature = layer(feature)
+        restored_img = torch.cat((latent, feature), dim=1)
+        for layer in self.decoder:
+            restored_img = layer(restored_img)
+        restored_img = self.restore(restored_img)
+        return restored_img
+
+    def forward(self, lited_up_image, illu_fea, target=None):
+        if self.training:
+            mu, log_var, latent = self.encode(target, illu_fea)
+        else:
+            mu = None
+            log_var = None
+            len_batch = lited_up_image.size(0)
+            hidden = self.lattent_dim
+            H = lited_up_image.size(2) // 2 ** self.encode_layer
+            W = lited_up_image.size(3) // 2 ** self.encode_layer
+            latent = torch.randn(len_batch, hidden, H, W).to(lited_up_image.device)
+        restored_img = self.decode(latent, lited_up_image, illu_fea)
+        return restored_img, mu, log_var
+
 class ColorComplementorVAE(nn.Module):
     def __init__(self, lattent_dim, encode_layer , feature_in=4, feature_out=3, **kwargs):
         super(ColorComplementorVAE, self).__init__()
@@ -129,7 +218,7 @@ class Illumination_Estimator(nn.Module):
             self.conv1 = nn.Conv2d(self.feature_in, self.hidden, kernel_size=1, stride=1, padding=0, bias=True)
             if kwargs.get("CNN_Kernel_size", None) is None:
                 print("Illumination estimator module do not initiate kernel size, using default value 5")
-            self.conv_fea = nn.Conv2d(self.hidden, self.hidden, kernel_size=kwargs.get('CNN_Kernel_size', 5), stride=1, padding=2, bias=True)
+            self.conv_fea = nn.Conv2d(self.hidden, self.hidden, kernel_size=kwargs.get('CNN_Kernel_size', 5), groups=self.hidden, stride=1, padding=2, bias=True)
             self.conv_map = nn.Conv2d(self.hidden, self.feature_out, kernel_size=1, stride=1, padding=0, bias=True)
             if kwargs.get("CNN_Feature_active", None) is None:
                 self.active = None

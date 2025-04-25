@@ -1,7 +1,10 @@
-import torch.nn
 import torch
 import utils
+import torch.nn as nn
+import torch.nn.functional as F
 import model.module_retindexformer as module_retindexformer
+from torchvision.models import vgg16
+from torchvision.transforms.functional import rgb_to_grayscale
 
 
 class Model(torch.nn.Module):
@@ -17,7 +20,6 @@ class Model(torch.nn.Module):
             model_args (torch.nn.Module): Argument for initlialize the model, use ./Options/xxx.yml to see the details.
         """
         super(Model, self).__init__()
-
         self.brightness_calculation_option = model_args['brightness_calculation_option']
 
         # ************************************************************************************************
@@ -51,11 +53,15 @@ class Model(torch.nn.Module):
 
         # ***********************************************************************************************
         
-        self.colorRestorator = module_retindexformer.ColorComplementorVAE(
-            lattent_dim=model_args["latent_dim"],
-            encode_layer=model_args["latent_encode_layer"],
-            feature_in = model_args["IE_feature_channels"] + 3 # light up image + feature
+        self.use_vae = model_args.get('use_vae', True)
+
+        if self.use_vae:
+            self.colorRestorator = module_retindexformer.ColorComplementorVAE(
+                lattent_dim=model_args["latent_dim"],
+                encode_layer=model_args["latent_encode_layer"],
+                feature_in = model_args["IE_feature_channels"] + 3
             )
+
         
         
         # ***********************************************************************************************
@@ -109,7 +115,12 @@ class Model(torch.nn.Module):
 
         # pixel has insufficient illumination might directly set to 0,0,0, with no color to light up
         # TODO::implement VAE here, according to illumination prior & input image to create color for underexposed area
-        restored_img, mu, log_var = self.colorRestorator(Lit_up_img, illu_fea, target_pic)
+        if self.use_vae:
+            restored_img, mu, log_var = self.colorRestorator(Lit_up_img, illu_fea, target_pic)
+        else:
+            restored_img = Lit_up_img
+            mu, log_var = None, None
+
         
         # Denoise the artifcat & noise (e.g., ISO noise) in the image
         output_img = self.denoise(restored_img, illu_fea)

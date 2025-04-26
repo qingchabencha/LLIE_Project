@@ -160,4 +160,4 @@ class VAELoss(torch.nn.Module):
             kl_loss = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
         else:
             kl_loss = 0.0
-        return recon_loss + kl_loss
+        return recon_loss, kl_loss

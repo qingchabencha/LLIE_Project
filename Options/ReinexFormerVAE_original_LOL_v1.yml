@@ -1,0 +1,35 @@
+network:
+  # device can be 'cpu' or 'cuda', or 'mps' for MacOS
+  device: cuda
+  # how to calculate brightness
+  # detail algorithm see utils.py
+  brightness_calculation_option: 1
+
+  # Illumination Estimator model
+  # simple cnn (original implementation) / fast fourier convolution
+  model_illumination_estimator_model: CNN # FFC
+  # if cnn
+  IE_feature_channels: 30
+  CNN_Kernel_size: 5
+  # the original paper do not use any activation function
+  # Option: None, relu, sigmoid
+  CNN_Feature_active: None
+
+  # if FFC
+
+  # VAE model
+  use_vae: True
+  latent_dim: 32 # latent dim for VAE
+  latent_encode_layer: 3
+
+  # The denoiser module
+  number_blocks: [1,2,2] # block number for Attention module.
+
+
+training:
+  batch_size : 4
+  epochs: 500
+  valid_per_iter : 30 # test and save all test images every N iterations
+  learning_rate: 1e-4
+  learning_rate_min: 1e-6
+  gamma: 0.98

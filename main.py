@@ -61,13 +61,13 @@ else:
 # direction of the dataset
 dataset_dir = "/path/to/dataset"
 # directory of low-light images
-train_low_dir = "./LOL-v2/Synthetic/Train/Low"
+train_low_dir = "./LOL-v2/Real_captured/Train/Low"
 # directory of high-light images
-train_bright_dir = "./LOL-v2/Synthetic/Train/Normal"
+train_bright_dir = "./LOL-v2/Real_captured/Train/Normal"
 
 # test
-test_low_dir = "./LOL-v2/Synthetic/Test/Low"
-test_bright_dir = "./LOL-v2/Synthetic/Test/Normal"
+test_low_dir = "./LOL-v2/Real_captured/Test/Low"
+test_bright_dir = "./LOL-v2/Real_captured/Test/Normal"
 
 
 """
@@ -167,7 +167,14 @@ def train_epoch(model, train_loader, log, optimizer, loss, device, epoch_num):
     loss.train()
     qbar = tqdm(train_loader)
     log["epoch"] = epoch_num
-    epoch_loss = 0
+    if isinstance(loss, VAELoss):
+        epoch_loss ={
+            "recon_loss": 0,
+            "kl_loss": 0,
+            "loss": 0
+        }
+    else:
+        epoch_loss = 0
     epoch_iter_num = len(train_loader)
     show_iter = int(random.uniform(0, epoch_iter_num))
     for i, batch in enumerate(qbar):
@@ -177,8 +184,9 @@ def train_epoch(model, train_loader, log, optimizer, loss, device, epoch_num):
         brightness_low = torch_type_adapt(batch["low_brightness_value"], device).to(device)
         brightness_high = torch_type_adapt(batch["bright_brightness_value"], device).to(device)    
         predict_high_light, mu, log_var = model(input_low_light, target_high_light ,input_brightness = brightness_low ,target_brightness=brightness_high ) 
-        if isinstance(loss, VAELoss):
-            l = loss(predict_high_light, target_high_light, mu, log_var)
+        if isinstance(loss, VAELoss): 
+            recon_loss, kl_loss = loss(predict_high_light, target_high_light, mu, log_var)
+            l= recon_loss + kl_loss
         else:
             l = loss(predict_high_light, target_high_light)
         l.backward()
@@ -187,9 +195,19 @@ def train_epoch(model, train_loader, log, optimizer, loss, device, epoch_num):
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
         optimizer.step()
-        loss_value = l.to('cpu').detach().item()
+        if isinstance(loss, VAELoss):
+            loss_value = {
+                "recon_loss": recon_loss.to('cpu').detach().item(),
+                "kl_loss": kl_loss.to('cpu').detach().item(),
+                "loss": l.to('cpu').detach().item()
+            }
+            for key in loss_value.keys(): 
+                epoch_loss[key] += loss_value[key]
+        else:
+            loss_value = l.to('cpu').detach().item()
+            epoch_loss += loss_value
         log["loss_iter"] = loss_value
-        epoch_loss += loss_value
+        
         qbar.set_postfix(log)
         # randomly show the image during the training
         if i == show_iter:
@@ -205,13 +223,13 @@ def train_epoch(model, train_loader, log, optimizer, loss, device, epoch_num):
                 print("Error in saving the image")
     return model, log, optimizer, loss, device, epoch_num, epoch_loss, qbar
 
-def test_epoch(model, test_loader, log, loss_fn, device, epoch_num, use_vae):
+def test_epoch(model, test_loader, log, loss_fn, device, epoch_num, use_vae, saveFigPerCentage = 0.01):
     model.eval()
     loss_fn.eval()
     total_loss = 0
     num_batches = 0
 
-    for i, batch in enumerate(test_loader):
+    for i, batch in tqdm(enumerate(test_loader), total=len(test_loader), desc="Testing"):
         input_low_light = torch_type_adapt(batch["low"], device).to(device)
         target_high_light = torch_type_adapt(batch["bright"], device).to(device)
         brightness_low = torch_type_adapt(batch["low_brightness_value"], device).to(device)
@@ -225,23 +243,24 @@ def test_epoch(model, test_loader, log, loss_fn, device, epoch_num, use_vae):
             )
 
             if use_vae:
-                l = loss_fn(pred, target_high_light, mu, log_var)
+                recon_loss, kl_loss = loss_fn(pred, target_high_light, mu, log_var)
+                l = recon_loss
             else:
                 l = loss_fn(pred, target_high_light)
 
             loss_value = l.to('cpu').detach().item()
             total_loss += loss_value
             num_batches += 1
-
-            batchly_show_pic(
-                input_low_light.to('cpu').detach(),
-                pred.to('cpu').detach(),
-                target_high_light.to('cpu').detach(),
-                brightness_high.to('cpu').detach(),
-                brightness_low.to('cpu').detach(),
-                test_transform,
-                save_path=train_savedir / f"training_results/test_epoch_{epoch_num}_iter_{i}.png"
-            )
+            if random.uniform(0, 1) < saveFigPerCentage:
+                batchly_show_pic(
+                    input_low_light.to('cpu').detach(),
+                    pred.to('cpu').detach(),
+                    target_high_light.to('cpu').detach(),
+                    brightness_high.to('cpu').detach(),
+                    brightness_low.to('cpu').detach(),
+                    test_transform,
+                    save_path=train_savedir / f"training_results/test_epoch_{epoch_num}_iter_{i}.png"
+                )
 
     avg_loss = total_loss / num_batches if num_batches > 0 else 0
     return model, log, loss_fn, device, epoch_num, avg_loss
@@ -249,8 +268,12 @@ def test_epoch(model, test_loader, log, loss_fn, device, epoch_num, use_vae):
 
 train_losses, test_losses = [], []
 best_test_loss = float('inf')
-best_model_path = train_savedir / "best_model.pth"
+best_train_recon_loss = float('inf')
+best_train_all_loss = float('inf')
+
+best_model_path = train_savedir
 for epoch in range(training_args['epochs']):
+    print(f"Epoch {epoch}/{training_args['epochs']}, LR: {scheduler.get_last_lr()[0]}")
     use_vae = model_args.get("use_vae", True)  # default to True if not specified
 
     # Train for one epoch
@@ -259,8 +282,13 @@ for epoch in range(training_args['epochs']):
     )
 
     # Evaluate on test set
+    # avoid saving too many test images
+    if epoch % valid_ == 0:
+        saveFigPerCentage = 1
+    else:
+        saveFigPerCentage = 0.01
     model, log, loss, device, epoch_num, test_loss = test_epoch(
-        model, test_loader, log, loss, device, epoch, use_vae
+        model, test_loader, log, loss, device, epoch, use_vae, saveFigPerCentage=saveFigPerCentage
     )
 
     # 📢 Print test loss
@@ -269,22 +297,29 @@ for epoch in range(training_args['epochs']):
     # Saving the best model regarding to test loss
     if test_loss < best_test_loss:
         best_test_loss = test_loss
-        torch.save(model.state_dict(), best_model_path)
+        torch.save(model.state_dict(), best_model_path  / "best_test_model.pth")
         print(f"💾 Best model saved at epoch {epoch} with test loss {best_test_loss:.4f}")
-
+    # Saving the best model regarding to train loss, on recon loss
+    if epoch_loss["recon_loss"] < best_train_recon_loss:
+        best_train_recon_loss = epoch_loss["recon_loss"]
+        torch.save(model.state_dict(), train_savedir / "best_train_recon_model.pth")
+        print(f"💾 Best train recon model saved at epoch {epoch} with recon loss {best_train_recon_loss:.4f}")
+    # Saving the best model regarding to train loss, on all loss
+    if epoch_loss["loss"] < best_train_all_loss: 
+        best_train_all_loss = epoch_loss["loss"]
+        torch.save(model.state_dict(), train_savedir / "best_train_all_loss_model.pth")
+        print(f"💾 Best train all model saved at epoch {epoch} with all loss {best_train_all_loss:.4f}")
 
     # Save model every 10 epochs
-    # if epoch % 10 == 1:
-    #     torch.save(model, train_savedir / "model.pth")
-    #     print(f"💾 Model saved at: {train_savedir / 'model.pth'}")
+    torch.save(model, train_savedir / "model.pth")
+    print(f"💾 Model saved at: {train_savedir / 'model.pth'}, with test loss {test_loss}, train loss {epoch_loss}")
 
     # Update learning rate
     scheduler.step()
 
     # Log and print training loss
-    log['loss_epoch'] = epoch_loss / len(train_loader)
     qbar.set_postfix(log)
-    print(f"[Epoch {epoch}] 🏋️ Train Loss: {log['loss_epoch']:.4f}")
+    print(f"[Epoch {epoch}] 🏋️ test loss: {test_loss}, train loss: {epoch_loss}")
     train_losses.append(log['loss_epoch'])
     test_losses.append(test_loss)
 

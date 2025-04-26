@@ -16,6 +16,7 @@ from tqdm import tqdm
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 import random
+import csv
 args = get_args()
 
 
@@ -95,7 +96,7 @@ test_dataset = LOLPairedDataset(test_low_dir,
                                 transform=test_transform, 
                                 train=False, 
                                 brightness_calculation_option=model_args['brightness_calculation_option'])
-test_loader = DataLoader(test_dataset, batch_size=3, shuffle=False)
+test_loader = DataLoader(test_dataset, batch_size=10, shuffle=False)
 
 
 
@@ -313,6 +314,36 @@ for epoch in range(training_args['epochs']):
     # Save model every 10 epochs
     torch.save(model, train_savedir / "model.pth")
     print(f"💾 Model saved at: {train_savedir / 'model.pth'}, with test loss {test_loss}, train loss {epoch_loss}")
+
+    # save log info
+
+    if isinstance(loss, VAELoss):
+        with open(train_savedir  / 'training_log.csv', mode='a', newline='', encoding='utf-8') as file:
+            writer = csv.writer(file)
+            writer.writerow([
+                epoch,
+                scheduler.get_last_lr()[0],
+                epoch_loss['loss'],
+                epoch_loss['recon_loss'],
+                epoch_loss['loss'],  # 如果有更详细的，可以分别填写
+                test_loss,
+                best_test_loss,
+                best_train_recon_loss,
+                best_train_all_loss
+            ])
+    else:
+        with open(train_savedir  / 'training_log.csv', mode='a', newline='', encoding='utf-8') as file:
+            writer = csv.writer(file)
+            writer.writerow([
+                epoch,
+                scheduler.get_last_lr()[0],
+                epoch_loss,
+                test_loss,
+                best_test_loss,
+                best_train_recon_loss,
+                best_train_all_loss
+            ])
+
 
     # Update learning rate
     scheduler.step()

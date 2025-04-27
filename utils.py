@@ -107,8 +107,8 @@ def batchly_show_pic(input_batch,
         predict_high_light_PIL, target_high_light_PIL = aug_transform.tensor2PIL(predict_batch[i,...],  target_batch[i,...])
         input_low_light_PIL, _  = aug_transform.tensor2PIL(input_batch[i,...], None)
         
-        brightness_level_low = illumination_level_high[i]
-        brightness_level_high =  illumination_level_low[i]
+        brightness_level_low = illumination_level_low[i]
+        brightness_level_high =  illumination_level_high[i]
         # 第1行: Picture input into the model
         axes[0, i].imshow(input_low_light_PIL)
         axes[0, i].set_title(f"Input {i+1}\nBrightness: {brightness_level_low:.2f}")

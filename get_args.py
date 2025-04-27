@@ -4,13 +4,13 @@ def get_args():
     parser.add_argument(
         "--model_option",
         type=str,
-        default="./Options/ReinexFormerVAE_original_LOL_v1.yml",
+        default="./Options/ReinexFormer_original_LOL_v1.yml",
         help="Path to the model option file",
     )
     parser.add_argument(
         "--train_save_dir",
         type=str,
-        default="VAE_1",
+        default="ORIGIN_1",
         help="Directory to save training results, default save to './train_results', if specified the file directory, like 1, it will try to load the trained model first",
     )
 

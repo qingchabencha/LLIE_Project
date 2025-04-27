@@ -301,15 +301,25 @@ for epoch in range(training_args['epochs']):
         torch.save(model.state_dict(), best_model_path  / "best_test_model.pth")
         print(f"💾 Best model saved at epoch {epoch} with test loss {best_test_loss:.4f}")
     # Saving the best model regarding to train loss, on recon loss
-    if epoch_loss["recon_loss"] < best_train_recon_loss:
-        best_train_recon_loss = epoch_loss["recon_loss"]
+    train_best = False
+    if isinstance(loss, VAELoss):
+        if epoch_loss["recon_loss"] < best_train_recon_loss:
+            train_best=True
+            best_train_recon_loss = epoch_loss["recon_loss"]
+    else:
+        if epoch_loss < best_train_recon_loss:
+            train_best=True
+            best_train_recon_loss = epoch_loss
+    if train_best:
         torch.save(model.state_dict(), train_savedir / "best_train_recon_model.pth")
         print(f"💾 Best train recon model saved at epoch {epoch} with recon loss {best_train_recon_loss:.4f}")
+        
     # Saving the best model regarding to train loss, on all loss
-    if epoch_loss["loss"] < best_train_all_loss: 
-        best_train_all_loss = epoch_loss["loss"]
-        torch.save(model.state_dict(), train_savedir / "best_train_all_loss_model.pth")
-        print(f"💾 Best train all model saved at epoch {epoch} with all loss {best_train_all_loss:.4f}")
+    if isinstance(loss, VAELoss):
+        if epoch_loss["loss"] < best_train_all_loss: 
+            best_train_all_loss = epoch_loss["loss"]
+            torch.save(model.state_dict(), train_savedir / "best_train_all_loss_model.pth")
+            print(f"💾 Best train all model saved at epoch {epoch} with all loss {best_train_all_loss:.4f}")
 
     # Save model every 10 epochs
     torch.save(model, train_savedir / "model.pth")

@@ -4,7 +4,39 @@ from PIL import Image
 import PIL
 import matplotlib.pyplot as plt
 from DatasetAndAugmentation.LowHighDataAugment import PairedTransforms
+import yaml
 import torch
+import torchvision
+import torch.nn.functional as F
+from skimage.metrics import peak_signal_noise_ratio as compare_psnr
+from skimage.metrics import structural_similarity as compare_ssim
+import numpy as np
+from tqdm import tqdm
+from model.model import Model
+import collections
+
+def compute_psnr(image_test, image_true ):
+    image_test = image_test.cpu().numpy().transpose(1, 2, 0)
+    image_true = image_true.cpu().numpy().transpose(1, 2, 0)
+    return compare_psnr(image_test=image_test, image_true =image_true , data_range=1.0)
+
+def compute_ssim(img1, img2):
+    img1 = img1.cpu().numpy().transpose(1, 2, 0)
+    img2 = img2.cpu().numpy().transpose(1, 2, 0)
+    return compare_ssim(img1, img2, multichannel=True, data_range=1.0, win_size=3)
+
+
+def compute_batch_metrics(pred_batch, target_batch):
+    psnr_list = []
+    ssim_list = []
+    for pred_img, target_img in zip(pred_batch, target_batch):
+        psnr = compute_psnr(image_test = pred_img, image_true = target_img)
+        ssim = compute_ssim(pred_img, target_img)
+        psnr_list.append(psnr)
+        ssim_list.append(ssim)
+    return psnr_list, ssim_list
+
+
 def cal_brightness(image: PIL.PngImagePlugin.PngImageFile, average=True, option=1):
     """
     Calculate the brightness of each pixel in the image.
@@ -117,3 +149,72 @@ def torch_type_adapt(input:torch.Tensor, device:torch.device) -> torch.Tensor:
     if device.type == 'mps':
         input = input.float()
     return input
+
+
+def valid_load_model(project_root, args, device):
+    train_savedir = project_root / "train_results" / args.train_save_dir
+    model_path = train_savedir / "model.pth"
+    option_path = args.model_option
+    yaml_info = yaml.safe_load(open(option_path, 'r'))
+    model_args = yaml_info["network"]
+    # Set up device
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    
+    # Load the model
+    model = torch.load(model_path, map_location=device)
+    if isinstance(model, collections.OrderedDict):
+        model = Model(model_args).to(device)
+        model.load_state_dict(torch.load(model_path, map_location=device))
+    model = model.to(device)
+    model.eval()
+    return model, model_args, device, train_savedir
+
+
+def valid_data(model, dataset_loader, brightness_threshold=torch.inf, device=None):
+    """
+    Validate the model on the dataset and save the results.
+    :param model: The model to be validated
+    :param dataset: The dataset to be validated on
+    :param brightness_threshold: The brightness threshold for filtering images
+    :param device: The device to run the model on (e.g., 'cpu', 'cuda', 'mps')
+    """
+    
+    if not device:
+        device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    # Set the model to evaluation mode
+    model.eval()
+    all_vae_psnr, all_vae_ssim = [], []
+    qualified_sample_count = 0 
+    with torch.no_grad():
+        for i, batch in tqdm(enumerate(dataset_loader)):
+            input_low = torch_type_adapt(batch["low"], device).to(device)
+            target_high = torch_type_adapt(batch["bright"], device).to(device)
+            brightness_low = torch_type_adapt(batch["low_brightness_value"], device).to(device)
+            brightness_high = torch_type_adapt(batch["bright_brightness_value"], device).to(device)
+
+            mask = (brightness_low.view(-1) < brightness_threshold)
+            if mask.sum() == 0:
+                continue  # skip this batch if no qualifying samples
+            
+            # Count unmasked samples
+            qualified_sample_count += mask.sum().item()
+            
+            # Apply the mask
+            input_low = input_low[mask]
+            target_high = target_high[mask]
+            brightness_low = brightness_low[mask]
+            brightness_high = brightness_high[mask]
+            
+            # Forward pass
+            pred, mu, log_var = model(
+                input_low, target_high,
+                input_brightness=brightness_low,
+                target_brightness=brightness_high
+            )
+            # Compute PSNR & SSIM
+            psnr_batch, ssim_batch = compute_batch_metrics(pred, target_high)
+            all_vae_psnr.extend(psnr_batch)
+            all_vae_ssim.extend(ssim_batch)
+        
+    return all_vae_psnr, all_vae_ssim, qualified_sample_count  
+    

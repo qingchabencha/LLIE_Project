@@ -1,0 +1,21 @@
+network:
+  CNN_Feature_active: None
+  CNN_Kernel_size: 5
+  IE_feature_channels: 30
+  brightness_calculation_option: 1
+  device: cuda
+  latent_dim: 32
+  latent_encode_layer: 3
+  model_illumination_estimator_model: CNN
+  number_blocks:
+  - 1
+  - 2
+  - 2
+  use_vae: false
+training:
+  batch_size: 3
+  epochs: 300
+  gamma: 0.98
+  learning_rate: 1e-4
+  learning_rate_min: 1e-6
+  valid_per_iter: 100
